@@ -11,10 +11,13 @@
        process is up rather than trusting the launched handle directly.
     3. Every $PollIntervalSeconds, checks Plex's WASAPI session peak meter.
        If audio is audible, blocks sleep (ES_SYSTEM_REQUIRED only - the
-       display can still turn off/lock normally). Releases the block the
-       moment audio stops.
+       display can still turn off/lock normally). The moment audio stops,
+       the block is released AND the system idle timer is reset, so the
+       full configured sleep timeout has to elapse again before Windows
+       sleeps (otherwise pausing after the timeout had already expired
+       would send the machine to sleep immediately).
     4. As soon as $ProcessName is no longer running, releases any sleep
-       block and exits.
+       block (again resetting the idle timer) and exits.
 
 .REQUIREMENTS
     NAudio.Core.dll and NAudio.Wasapi.dll (v2.x) sitting next to this script,
@@ -88,6 +91,19 @@ $ES_CONTINUOUS      = [Convert]::ToUInt32("80000000", 16)
 $ES_SYSTEM_REQUIRED = [Convert]::ToUInt32("00000001", 16)
 # ES_DISPLAY_REQUIRED intentionally omitted - audio-only, so the display
 # is allowed to turn off/lock on its normal schedule.
+
+function Clear-SleepBlock {
+    <#
+        Clears the continuous sleep block, then issues a one-shot
+        ES_SYSTEM_REQUIRED (without ES_CONTINUOUS). The one-shot call resets
+        the system idle timer, so the full configured sleep timeout has to
+        elapse again before Windows can sleep. Without it, a pause after the
+        timeout had already expired would put the machine to sleep instantly.
+        No power-plan settings are modified.
+    #>
+    [Native.Power]::SetThreadExecutionState($ES_CONTINUOUS) | Out-Null
+    [Native.Power]::SetThreadExecutionState($ES_SYSTEM_REQUIRED) | Out-Null
+}
 
 function Get-PlexAudioPeak {
     param([string]$ProcName)
@@ -183,15 +199,15 @@ try {
             Write-Host "$(Get-Date -Format T)  Plex audio detected (peak=$peak) - blocking sleep."
         }
         elseif (-not $isAudible -and $currentlyBlocking) {
-            [Native.Power]::SetThreadExecutionState($ES_CONTINUOUS) | Out-Null
+            Clear-SleepBlock
             $currentlyBlocking = $false
-            Write-Host "$(Get-Date -Format T)  Plex audio stopped - normal sleep behavior restored."
+            Write-Host "$(Get-Date -Format T)  Plex audio stopped - sleep timer reset, normal sleep behavior restored."
         }
 
         Start-Sleep -Seconds $PollIntervalSeconds
     }
 }
 finally {
-    [Native.Power]::SetThreadExecutionState($ES_CONTINUOUS) | Out-Null
-    Write-Host "Sleep block released. Exiting."
+    Clear-SleepBlock
+    Write-Host "Sleep block released and sleep timer reset. Exiting."
 }
