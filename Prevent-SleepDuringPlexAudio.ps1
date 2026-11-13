@@ -12,7 +12,7 @@
     3. Every $PollIntervalSeconds, checks Plex's WASAPI session peak meter.
        If audio is audible, blocks sleep (ES_SYSTEM_REQUIRED only - the
        display can still turn off/lock normally). The moment audio stops,
-       the block is released AND the system idle timer is reset, so the
+       the system idle timer is reset BEFORE the block is released, so the
        full configured sleep timeout has to elapse again before Windows
        sleeps (otherwise pausing after the timeout had already expired
        would send the machine to sleep immediately).
@@ -94,15 +94,18 @@ $ES_SYSTEM_REQUIRED = [Convert]::ToUInt32("00000001", 16)
 
 function Clear-SleepBlock {
     <#
-        Clears the continuous sleep block, then issues a one-shot
-        ES_SYSTEM_REQUIRED (without ES_CONTINUOUS). The one-shot call resets
-        the system idle timer, so the full configured sleep timeout has to
-        elapse again before Windows can sleep. Without it, a pause after the
-        timeout had already expired would put the machine to sleep instantly.
+        Issues a one-shot ES_SYSTEM_REQUIRED (without ES_CONTINUOUS) while
+        the continuous sleep block is still held, then clears the block.
+        Resetting the system idle timer first prevents Windows from sleeping
+        between the two calls if the previous idle timeout has already elapsed.
         No power-plan settings are modified.
     #>
-    [Native.Power]::SetThreadExecutionState($ES_CONTINUOUS) | Out-Null
-    [Native.Power]::SetThreadExecutionState($ES_SYSTEM_REQUIRED) | Out-Null
+    if ([Native.Power]::SetThreadExecutionState($ES_SYSTEM_REQUIRED) -eq 0) {
+        throw "Failed to reset the system idle timer before releasing the sleep block."
+    }
+    if ([Native.Power]::SetThreadExecutionState($ES_CONTINUOUS) -eq 0) {
+        throw "Failed to release the sleep block after resetting the system idle timer."
+    }
 }
 
 function Get-PlexAudioPeak {
