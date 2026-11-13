@@ -16,3 +16,6 @@ PowerShell Script to prevent Windows from sleeping while Plex is playing audio-o
 
 ## Regression test
 Run `pwsh -NoProfile -File ./tests/Clear-SleepBlock.Tests.ps1` in a fresh PowerShell process. This uses a fake Windows API to check the reset/release order and error handling; actual sleep timing must be checked on Windows.
+
+## AI Disclosure
+Written by Google Gemini and GitHub Copilot.  All code reviewed and approved by a human.
